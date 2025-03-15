@@ -1,0 +1,15 @@
+version: '3'
+
+services:
+  skyflow-detokenizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    environment:
+      - GIN_MODE=release
+    restart: unless-stopped

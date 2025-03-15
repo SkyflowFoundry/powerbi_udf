@@ -1,0 +1,32 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Skyflow Detokenizer Lambda Function
+
+Resources:
+  SkyflowDetokenizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: bootstrap
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          GIN_MODE: release
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /detokenize
+            Method: post
+
+Outputs:
+  SkyflowDetokenizerFunction:
+    Description: "Skyflow Detokenizer Lambda Function ARN"
+    Value: !GetAtt SkyflowDetokenizerFunction.Arn
+  SkyflowDetokenizerApi:
+    Description: "API Gateway endpoint URL for Prod stage"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/detokenize"

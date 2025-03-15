@@ -1,0 +1,14 @@
+skyflow:
+  vault_url: "https://your-vault-url.skyflowapis.com"
+  bearer_token: "your-bearer-token"
+  batch_size: 25  # Consult with Skyflow team before increasing this value. If you are not sure then keep it to 25 max
+  parallel_calls: 7 # Consult with Skyflow team before increasing this value. Taking this higher could result blocking on Cloudflare
+  request_timeout_seconds: 30
+
+server:
+  port: 8080
+
+logging:
+  level: "info"        # "info" or "debug"
+  log_to_file: false   # true to log to file, false for console
+  file_path: "./logs/skyflow_detokenizer.log"
