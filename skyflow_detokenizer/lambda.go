@@ -1,3 +1,6 @@
+//go:build lambda
+// +build lambda
+
 package main
 
 import (

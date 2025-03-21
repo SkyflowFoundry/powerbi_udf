@@ -21,8 +21,8 @@ Configuration is managed through a YAML file located at `config/config.yaml`:
 skyflow:
   vault_url: "https://your-vault-url.vault.skyflowapis.com/v1/vaults/your-vault-id"
   bearer_token: "your-bearer-token"
-  batch_size: 100
-  parallel_calls: 10
+  batch_size: 25
+  parallel_calls: 8
   request_timeout_seconds: 30
 
 server:
@@ -84,16 +84,37 @@ Response:
 
 ### Local Deployment
 
-1. Ensure Go is installed on your system (version 1.16 or higher)
-2. Update the `config/config.yaml` file with your Skyflow credentials
-3. Build and run the application:
+#### Prerequisites
+- Go 1.16 or later
 
-```bash
-go mod init skyflow_detokenizer
-go mod tidy
-go build
-./skyflow_detokenizer
-```
+#### Steps
+
+1. Create your configuration:
+   ```bash
+   cp config/config.yaml config/config.yaml.example
+   # Edit the configuration file with your Skyflow credentials
+   ```
+
+2. Build and run the server version:
+   ```bash
+   go mod init skyflow_detokenizer
+   go mod tidy
+   ./build_server.sh
+   ./skyflow-detokenizer-server
+   ```
+
+3. Test the API:
+   ```bash
+   curl -X POST http://localhost:8080/detokenize \
+     -H "Content-Type: application/json" \
+     -d '{
+       "tokens": [
+         {"token": "token1"},
+         {"token": "token2"}
+       ],
+       "redaction": "PLAIN_TEXT"
+     }'
+   ```
 
 ### Docker Deployment
 
@@ -121,8 +142,8 @@ docker-compose up -d
 3. Build and deploy the Lambda function:
 
 ```bash
-# Build the Lambda function
-GOOS=linux GOARCH=amd64 go build -o bootstrap lambda.go
+# Build the Lambda function using the provided script
+./build_lambda.sh
 
 # Deploy using SAM CLI
 sam deploy --guided
@@ -139,14 +160,10 @@ If you prefer to deploy manually:
 
 1. Build the Lambda function:
 ```bash
-GOOS=linux GOARCH=amd64 go build -o bootstrap lambda.go
+./build_lambda.sh
 ```
 
-2. Create a deployment package:
-```bash
-zip skyflow-detokenizer-lambda.zip bootstrap
-zip -r skyflow-detokenizer-lambda.zip config/
-```
+2. The script will create a deployment package named `skyflow-detokenizer-lambda.zip`
 
 3. Create or update the Lambda function using AWS CLI:
 ```bash
@@ -164,14 +181,21 @@ aws lambda update-function-code \
   --zip-file fileb://skyflow-detokenizer-lambda.zip
 ```
 
-4. Create an API Gateway trigger:
-```bash
-aws lambda add-permission \
-  --function-name skyflow-detokenizer \
-  --statement-id apigateway \
-  --action lambda:InvokeFunction \
-  --principal apigateway.amazonaws.com
-```
+## Project Structure
+
+This project contains both a web server implementation and an AWS Lambda implementation:
+
+- `main.go`: Contains the web server implementation (using Gin framework)
+- `lambda.go`: Contains the AWS Lambda implementation
+
+The codebase uses Go build tags to manage these two different entry points:
+
+- To build the web server version: `go build -tags server`
+- To build the Lambda version: `go build -tags lambda`
+
+Helper scripts are provided to simplify building each version:
+- `build_server.sh`: Builds the web server version
+- `build_lambda.sh`: Builds the Lambda version and creates a deployment package
 
 ## Security Considerations
 
@@ -188,4 +212,3 @@ If you encounter issues:
 2. Verify your Skyflow credentials in the config file
 3. Ensure your network allows connections to the Skyflow API
 4. For Lambda deployments, check the CloudWatch logs
-

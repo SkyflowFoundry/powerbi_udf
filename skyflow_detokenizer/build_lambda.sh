@@ -2,7 +2,7 @@
 
 # Build the Lambda function
 echo "Building Lambda function..."
-GOOS=linux GOARCH=amd64 go build -o bootstrap lambda.go
+GOOS=linux GOARCH=amd64 go build -tags lambda -o bootstrap lambda.go
 
 # Create deployment package
 echo "Creating deployment package..."
