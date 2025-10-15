@@ -10,6 +10,8 @@ To address this, a secure and scalable integration was designed using **Azure in
 
 ## High-Level Architecture
 
+![Power BI Service detokenization architecture](../images/PowerBIService%3C%3ESkyflow.svg)
+
 1. **Power BI Service (Power Query)** initiates a call to a protected **Azure Function** endpoint to fetch detokenized data.
 
 2. Since **Power Query** does not hold the actual user identity, it authenticates to the Azure Function using an **organizational account (OAuth2)**.

@@ -1,9 +1,5 @@
+// Power Query helper that detokenizes Skyflow tokens by calling the Azure Function.
 let
-    ToJsonText = (value as any) as text =>
-        let
-            jsonBinary = Json.FromValue(value), jsonText = Text.FromBinary(jsonBinary)
-        in
-            jsonText,
     // Detokenize multiple tokens in one API call
     Detokenize = (tokenList as list) as record =>
         let
@@ -40,6 +36,7 @@ let
             )
         in
             rowWithName,
+    // Transform each row in the input table by enriching with detokenized values
     AddApiResponses = (inputTable as table) as table =>
         Table.FromRecords(List.Transform(Table.ToRecords(inputTable), each DetokenizeRecord(_)))
 in

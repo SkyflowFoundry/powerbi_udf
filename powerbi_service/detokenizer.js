@@ -1,9 +1,24 @@
+/** Sample Azure Function entry point that performs role-aware Skyflow detokenization for Power BI. */
+"use strict";
+
 const { app } = require("@azure/functions");
 const axios = require("axios");
 const { Client } = require("@microsoft/microsoft-graph-client");
 require("isomorphic-fetch");
 const { generateBearerTokenFromCreds } = require("skyflow-node");
-const qs = require("qs"); // helps build x-www-form-urlencoded content
+const qs = require("qs"); // build x-www-form-urlencoded payloads for AAD
+
+const {
+  SKYFLOW_SERVICE_ACCOUNT = "{}", // This can be fetched from Azure Key Vault or other secure location
+  SKYFLOW_VAULT_URL: VAULT_URL,
+  SKYFLOW_VAULT_ID: VAULT_ID,
+} = process.env;
+
+/** Map Azure AD directory roles to Skyflow role IDs that the service account may assume. */
+const SKYFLOW_ROLE_MAPPINGS = [
+  { name: "Azure Role1", id: "skyflowRoleID1" },
+  { name: "Azure Role2", id: "skyflowRoleID2" },
+];
 
 async function getAppOnlyToken(tenantId, clientId, clientSecret) {
   const tokenEndpoint = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
@@ -15,21 +30,24 @@ async function getAppOnlyToken(tenantId, clientId, clientSecret) {
     scope: "https://graph.microsoft.com/.default",
   });
 
-  try {
-    const response = await axios.post(tokenEndpoint, data, {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    });
+  const response = await axios.post(tokenEndpoint, data, {
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+  });
 
-    return response.data.access_token;
-  } catch (error) {
-    console.error(
-      "Error getting token:",
-      error.response?.data || error.message
-    );
-    throw error;
-  }
+  return response.data.access_token;
+}
+
+function findSkyflowRoleId(directoryRoles) {
+  const match = SKYFLOW_ROLE_MAPPINGS.find(({ name }) =>
+    directoryRoles.some((role) => role.displayName === name)
+  );
+  return match?.id;
+}
+
+function buildDetokenizationRequest(tokens) {
+  return tokens.map((token) => ({ token }));
 }
 
 app.http("detokenize", {
@@ -38,99 +56,98 @@ app.http("detokenize", {
   handler: async (request, context) => {
     try {
       context.log(`Http function processed request for url "${request.url}"`);
-      const skyflowRoles = [
-        {
-          name: "Global Administrator",
-          ID: "skyflowRoleID",
-        },
-        { name: "Attribute Log Reader", ID: "skyflowRoleID" },
-      ];
-      const queryParams = request.query;
-      const tokens = queryParams.getAll("token");
-      let roleID = "";
-      const accessToken = await getAppOnlyToken(
-        "tenant_id",
-        "client_id",
-        "client_secret"
-      );
+
+      if (!VAULT_URL || !VAULT_ID) {
+        throw new Error("Missing VAULT_URL or VAULT_ID configuration.");
+      }
+
+      const tokens = request.query?.getAll("token") ?? [];
+      if (!tokens.length) {
+        return {
+          status: 400,
+          body: JSON.stringify({ message: "At least one token query parameter is required." }),
+          headers: { "Content-Type": "application/json" },
+        };
+      }
+
+      const userId = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME");
+      if (!userId) {
+        return {
+          status: 401,
+          body: JSON.stringify({ message: "Missing user identity header." }),
+          headers: { "Content-Type": "application/json" },
+        };
+      }
+
+      const accessToken = await getAppOnlyToken("tenant_id", "client_id", "client_secret");
       if (!accessToken) {
         return {
           status: 401,
-          body: "Missing AAD token",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          body: JSON.stringify({ message: "Unable to acquire Microsoft Graph token." }),
+          headers: { "Content-Type": "application/json" },
         };
       }
+
       const graphClient = Client.init({
-        authProvider: (done) =>
-          done(
-            null,
-            accessToken
-          ),
+        authProvider: (done) => done(null, accessToken),
       });
-      const userId = request.headers.get("X-MS-CLIENT-PRINCIPAL-NAME");
-      let groups = [];
-      groups = await graphClient.api(`/users/${userId}/memberOf`).get();
-      const roles = groups.value.filter(
-        (item) => item["@odata.type"] === "#microsoft.graph.directoryRole"
+
+      // Use Microsoft Graph to materialize the caller's directory roles.
+      const membership = await graphClient.api(`/users/${encodeURIComponent(userId)}/memberOf`).get();
+      const directoryRoles =
+        membership.value?.filter(
+          (item) => item["@odata.type"] === "#microsoft.graph.directoryRole"
+        ) ?? [];
+
+      const skyflowRoleId = findSkyflowRoleId(directoryRoles);
+      if (!skyflowRoleId) {
+        return {
+          status: 403,
+          body: JSON.stringify({ message: "User is not mapped to a Skyflow role." }),
+          headers: { "Content-Type": "application/json" },
+        };
+      }
+
+      const serviceAccountToken = await generateBearerTokenFromCreds(
+        SKYFLOW_SERVICE_ACCOUNT,
+        { roleIDs: [skyflowRoleId] }
       );
 
-      roleID = skyflowRoles.find((skyflowRole) => {
-        const match = roles.find(
-          (role) => skyflowRole.name == role.displayName
-        );
-        return match ? true : false;
-      });
-      const at = await generateBearerTokenFromCreds(
-        JSON.stringify({
-          // Service account credentials here
-          // This can be fetched from function ENV variables 
-        }),
-        { roleIDs: [roleID.ID] }
-      );
-      const detokenizeRequest = tokens.map((token) => {
-        return {
-          "token": token
-        }
-      })
-      // Can be fetched from ENV config or set in the function itself
+      const detokenizationPayload = {
+        detokenizationParameters: buildDetokenizationRequest(tokens),
+      };
+
       const detokenized = await axios.post(
         `${VAULT_URL}/v1/vaults/${VAULT_ID}/detokenize`,
-        {
-          detokenizationParameters: detokenizeRequest
-        },
+        detokenizationPayload,
         {
           headers: {
-            Authorization: `Bearer ${at.accessToken}`,
+            Authorization: `Bearer ${serviceAccountToken.accessToken}`,
             "Content-Type": "application/json",
           },
         }
       );
-      const detokenizeResponse = detokenized.data["records"].map(element => {
-       return {
-          token: element["token"],
-          value: element["value"]
-        }
-      });
+
+      const detokenizedRecords =
+        detokenized.data.records?.map((record) => ({
+          token: record.token,
+          value: record.value,
+        })) ?? [];
+
       return {
         status: 200,
-        body: JSON.stringify(detokenizeResponse),
-        headers: {
-          "Content-Type": "application/json",
-        },
+        body: JSON.stringify(detokenizedRecords),
+        headers: { "Content-Type": "application/json" },
       };
     } catch (error) {
-      context.log("Error during detokenize API call:", error?.data ?? error?.message);
+      context.log("Error during detokenize API call:", error?.response?.data ?? error?.message);
       return {
         status: 500,
         body: JSON.stringify({
           value: "ERROR",
-          message: error?.data ?? error?.message,
+          message: error?.response?.data ?? error?.message,
         }),
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
       };
     }
   },
