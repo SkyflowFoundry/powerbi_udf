@@ -14,12 +14,6 @@ const {
   SKYFLOW_VAULT_ID: VAULT_ID,
 } = process.env;
 
-/** Map Azure AD directory roles to Skyflow role IDs that the service account may assume. */
-const SKYFLOW_ROLE_MAPPINGS = [
-  { name: "Azure Role1", id: "skyflowRoleID1" },
-  { name: "Azure Role2", id: "skyflowRoleID2" },
-];
-
 async function getAppOnlyToken(tenantId, clientId, clientSecret) {
   const tokenEndpoint = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
 
@@ -37,13 +31,6 @@ async function getAppOnlyToken(tenantId, clientId, clientSecret) {
   });
 
   return response.data.access_token;
-}
-
-function findSkyflowRoleId(directoryRoles) {
-  const match = SKYFLOW_ROLE_MAPPINGS.find(({ name }) =>
-    directoryRoles.some((role) => role.displayName === name)
-  );
-  return match?.id;
 }
 
 function buildDetokenizationRequest(tokens) {
@@ -99,18 +86,17 @@ app.http("detokenize", {
           (item) => item["@odata.type"] === "#microsoft.graph.directoryRole"
         ) ?? [];
 
-      const skyflowRoleId = findSkyflowRoleId(directoryRoles);
-      if (!skyflowRoleId) {
-        return {
-          status: 403,
-          body: JSON.stringify({ message: "User is not mapped to a Skyflow role." }),
-          headers: { "Content-Type": "application/json" },
-        };
-      }
+      const ctxRoles = directoryRoles.map((role) => role.displayName)
+
+      const options = {
+        ctx: {
+          role: ctxRoles
+        },
+      };
 
       const serviceAccountToken = await generateBearerTokenFromCreds(
         SKYFLOW_SERVICE_ACCOUNT,
-        { roleIDs: [skyflowRoleId] }
+        options
       );
 
       const detokenizationPayload = {
