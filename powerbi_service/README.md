@@ -46,9 +46,13 @@ To address this, a secure and scalable integration was designed using **Azure in
 
 - Within Power Query, a **secured HTTP call** was made to the Azure Function using the **Organizational Account** authentication type.
 
-- This setup allowed Power BI to **offload detokenization logic** while maintaining alignment with **identity-based access policies**.
-
 ---
+
+## Limitations
+
+- When using Organizational Account as the authentication method, the logged-in user’s identity can be retrieved, but the request cannot include a payload. Only GET requests are supported, so any tokens must be passed through query parameters.
+
+- This may introduce performance overhead.
 
 ## Outcome
 
